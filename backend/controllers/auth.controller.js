@@ -17,10 +17,8 @@ exports.register = async (req, res, next) => {
     const accessToken = signAccessToken({ sub: user._id });
     const refreshToken = signRefreshToken({ sub: user._id });
 
-    user.refreshTokens = []; // clear old tokens
     user.refreshTokens.push({ token: refreshToken, createdAt: new Date() });
     await user.save();
-    
 
     res.cookie('refreshToken', refreshToken, { httpOnly: true, sameSite: 'lax' });
     res.status(201).json({ user: { id: user._id, email: user.email, name: user.name }, accessToken });
@@ -40,11 +38,8 @@ exports.login = async (req, res, next) => {
     const accessToken = signAccessToken({ sub: user._id });
     const refreshToken = signRefreshToken({ sub: user._id });
 
-    user.refreshTokens = []; // clear old tokens
     user.refreshTokens.push({ token: refreshToken, createdAt: new Date() });
     await user.save();
-    
-
 
     res.cookie('refreshToken', refreshToken, { httpOnly: true, sameSite: 'lax' });
     res.json({ accessToken, user: { id: user._id, name: user.name, email: user.email } });
@@ -66,49 +61,37 @@ exports.refresh = async (req, res, next) => {
     const user = await User.findById(payload.sub);
     if (!user) return res.status(401).json({ message: 'User not found' });
 
-    // find token index
-    const index = user.refreshTokens.findIndex(r => r.token === token);
-
-    if (index === -1) {
-      // possible reuse attack, clear all refresh tokens
+    const found = user.refreshTokens.find(r => r.token === token);
+    if (!found) {
+      // possible token reuse attack.. clear all refresh tokens for safety
       user.refreshTokens = [];
       await user.save();
       return res.status(401).json({ message: 'Refresh token not recognized' });
     }
 
-    // remove old token
-    user.refreshTokens.splice(index, 1);
-
-    // add new token
+    // rotate: remove old, add new
+    user.refreshTokens = user.refreshTokens.filter(r => r.token !== token);
     const newRefreshToken = signRefreshToken({ sub: user._id });
     user.refreshTokens.push({ token: newRefreshToken, createdAt: new Date() });
+    await user.save();
 
-    await user.save(); // save once
-
-    // return new tokens
     const accessToken = signAccessToken({ sub: user._id });
     res.cookie('refreshToken', newRefreshToken, { httpOnly: true, sameSite: 'lax' });
     res.json({ accessToken });
   } catch (err) { next(err); }
 };
 
-
 exports.logout = async (req, res, next) => {
   try {
     const token = req.cookies.refreshToken || req.body.refreshToken;
     if (token) {
-      await User.findByIdAndUpdate(
-        req.user.id,
-        { $pull: { refreshTokens: { token } } }
-      );
+      // remove token from DB
+      await User.updateOne({}, { $pull: { refreshTokens: { token } }});
     }
     res.clearCookie('refreshToken');
     res.json({ ok: true });
-  } catch (err) {
-    next(err);
-  }
+  } catch (err) { next(err); }
 };
-
 
 exports.me = async (req, res, next) => {
   try {
