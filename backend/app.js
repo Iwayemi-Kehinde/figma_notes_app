@@ -7,6 +7,7 @@ const cookieParser = require('cookie-parser');
 
 const authRoutes = require('./routes/auth.route');
 const boardRoutes = require('./routes/board.routes');
+const noteRoutes = require("./routes/note.routes.js")
 
 
 const app = express();
@@ -18,6 +19,7 @@ app.use(cookieParser());
 
 app.use('/api/auth', authRoutes);
 app.use('/api/boards', boardRoutes);
+app.use("/api/notes", noteRoutes)
 
 app.use((err, req, res, next) => {
   console.error(err);
