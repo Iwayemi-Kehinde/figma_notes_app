@@ -1,27 +1,53 @@
 const User = require('../models/user.model');
 const { signAccessToken, signRefreshToken, hashPassword, comparePassword } = require('../utils/auth.utils');
 const jwt = require('jsonwebtoken');
+const crypto = require("crypto");
+const { sendVerifyEmail } = require('../utils/email.utils');
 
 exports.register = async (req, res, next) => {
   try {
     const { name, email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: 'email and password required' });
 
+    const normalizedEmail = email.toLowercase().trim()
+
     const exists = await User.findOne({ email });
-    if (exists) return res.status(400).json({ message: 'User already exists' });
+    if (exists && exists.emailVerified === true) return res.status(400).json({ message: 'User already exists' })
+
+    if(exists && exists.emailVerified === false) {
+      const verifyToken = crypto.randomBytes(32).toString("hex");
+      const verifyTokenExpire = new Date(Date.now() + 30 * 60 * 1000);
+  
+      user.verifyToken = verifyToken
+      user.verifyTokenExpire = verifyTokenExpire
+
+      await user.save()
+
+      const verifyLink = `${process.env.APP_URL}/verify-token?token=${verifyToken}&email=${normalizedEmail}`
+
+      await sendVerifyEmail(normalizedEmail, verifyLink);
+  
+      return res.status(201).json({ message: "Email verification Link re-sent.. Please check your inbox" });
+    }
+
+    //For New Users
 
     const passwordHash = await hashPassword(password);
-    const user = new User({ name, email, passwordHash });
-    await user.save();
+    const user = new User({ name, email, passwordHash })
 
-    const accessToken = signAccessToken({ sub: user._id });
-    const refreshToken = signRefreshToken({ sub: user._id });
+    const verifyToken = crypto.randomBytes(32).toString("hex");
+    const verifyTokenExpire = new Date(Date.now() + 30 * 60 * 1000);
 
-    user.refreshTokens.push({ token: refreshToken, createdAt: new Date() });
-    await user.save();
+    user.verifyToken = verifyToken
+    user.verifyTokenExpire = verifyTokenExpire
 
-    res.cookie('refreshToken', refreshToken, { httpOnly: true, sameSite: 'lax' });
-    res.status(201).json({ user: { id: user._id, email: user.email, name: user.name }, accessToken });
+    await user.save()
+
+    const verifyLink = `${process.env.APP_URL}/verify-token?token=${verifyToken}&email=${normalizedEmail}`
+
+    await sendVerifyEmail(normalizedEmail, verifyLink);
+
+    res.status(201).json({ message: "Email verification Link sent... Please check your inbox" });
   } catch (err) { next(err); }
 };
 
@@ -86,7 +112,7 @@ exports.logout = async (req, res, next) => {
     const token = req.cookies.refreshToken || req.body.refreshToken;
     if (token) {
       // remove token from DB
-      await User.updateOne({}, { $pull: { refreshTokens: { token } }});
+      await User.updateOne({}, { $pull: { refreshTokens: { token } } });
     }
     res.clearCookie('refreshToken');
     res.json({ ok: true });
