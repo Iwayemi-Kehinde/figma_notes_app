@@ -9,15 +9,15 @@ exports.register = async (req, res, next) => {
     const { name, email, password } = req.body;
     if (!email || !password) return res.status(400).json({ message: 'email and password required' });
 
-    const normalizedEmail = email.toLowercase().trim()
+    const normalizedEmail = email.toLowerCase().trim()
 
     const exists = await User.findOne({ email });
     if (exists && exists.emailVerified === true) return res.status(400).json({ message: 'User already exists' })
 
-    if(exists && exists.emailVerified === false) {
+    if (exists && exists.emailVerified === false) {
       const verifyToken = crypto.randomBytes(32).toString("hex");
       const verifyTokenExpire = new Date(Date.now() + 30 * 60 * 1000);
-  
+
       user.verifyToken = verifyToken
       user.verifyTokenExpire = verifyTokenExpire
 
@@ -26,7 +26,7 @@ exports.register = async (req, res, next) => {
       const verifyLink = `${process.env.APP_URL}/verify-token?token=${verifyToken}&email=${normalizedEmail}`
 
       await sendVerifyEmail(normalizedEmail, verifyLink);
-  
+
       return res.status(201).json({ message: "Email verification Link re-sent.. Please check your inbox" });
     }
 
@@ -50,6 +50,38 @@ exports.register = async (req, res, next) => {
     res.status(201).json({ message: "Email verification Link sent... Please check your inbox" });
   } catch (err) { next(err); }
 };
+
+
+exports.verifyEmail = async (req, res, next) => {
+  try {
+    const { token, email } = req.body;
+
+    if (!token || !email) {
+      return res.status(400).send("Invalid verification link");
+    }
+
+    //Find user by email
+    const user = await User.findOne({ email });
+
+    if (!user) {
+      return res.status(404).send("Not found");
+    }
+    verifyTokenExpire
+    const verified = user.verifyToken === token && user.verifyTokenExpire > Date.now()
+
+    if (verified) {
+      user.emailVerified = true;
+      user.verifyToken = null
+      user.verifyTokenExpire = null
+      await user.save();
+      return res.status(204).send({ message: "Email verified... you can now login!" });
+    } else {
+      return res.status(400).send("Invalid or expired token");
+    }
+  } catch (err) {
+    next(err)
+  }
+}
 
 exports.login = async (req, res, next) => {
   try {
